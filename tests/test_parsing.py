@@ -1,0 +1,322 @@
+from __future__ import annotations
+
+from dataclasses import InitVar, dataclass, field
+
+import pytest
+
+from sevaht_utility.parsing import (
+    ColumnSubsetError,
+    StringParser,
+    csv_load,
+    json5_load,
+)
+
+
+@dataclass
+class FromRegistered:
+    value: int = field(init=False, default=0)
+    str_value: InitVar[str | None] = None
+
+    def __post_init__(self, str_value: str | None) -> None:
+        if str_value is not None:
+            self.value = int(str_value)
+
+
+@pytest.fixture
+def string_parser_from_registered() -> StringParser:
+    parser = StringParser()
+    parser.set_converter(
+        FromRegistered, converter=FromRegistered  # constructor
+    )
+    return parser
+
+
+@dataclass
+class FromMethod:
+    value: int
+
+    @classmethod
+    def from_string(cls, value: str) -> FromMethod:
+        return cls(int(value))
+
+
+@dataclass
+class ComplexClass:
+    number: int = field(metadata={"csv_key": "CUSTOM_number"})
+    float_number: float
+    from_registered: FromRegistered
+    from_method: FromMethod
+    string: str
+    extra_argument: int = 0
+
+
+@pytest.fixture
+def csv_header() -> str:
+    return "CUSTOM_number,float_number,from_registered,from_method,string"
+
+
+@pytest.fixture
+def csv_rows() -> list[str]:
+    return [
+        "1,3.14,2,3,Hello",
+        "4,2.71,5,6,Goodbye",
+        "9,11.72,311,123,Longer Text",
+    ]
+
+
+@pytest.fixture
+def csv_lines(csv_header: str, csv_rows: list[str]) -> list[str]:
+    return [csv_header, *csv_rows]
+
+
+def test_csv_load_into_dataclass(
+    csv_lines: list[str],
+    csv_rows: list[str],
+    string_parser_from_registered: StringParser,
+) -> None:
+    """Verify normal dataclass loading with automatic converters
+    and metadata mapping."""
+    instances = list(
+        csv_load(
+            csv_lines,
+            dataclass=ComplexClass,
+            string_parser=string_parser_from_registered,
+        )
+    )
+    assert len(instances) == len(csv_rows)
+
+    for instance, row in zip(instances, csv_rows):
+        n, f, r, m, s = row.split(",")
+        assert instance.number == int(n)
+        assert instance.float_number == float(f)
+        assert instance.from_registered.value == int(r)
+        assert instance.from_method.value == int(m)
+        assert instance.string == s
+
+
+def test_csv_load_raises_if_not_dataclass(csv_lines: list[str]) -> None:
+    """Passing a non-dataclass type to `dataclass` should raise TypeError."""
+
+    class NotADataClass:
+        pass
+
+    with pytest.raises(TypeError, match="isn't a dataclass"):
+        list(csv_load(csv_lines, dataclass=NotADataClass))
+
+
+def test_csv_load_dataclass_with_custom_init(
+    csv_lines: list[str],
+    csv_rows: list[str],
+    string_parser_from_registered: StringParser,
+) -> None:
+    """Verify `init_function` and `init_arguments` alter the resulting
+    instances as expected."""
+
+    def custom_factory(
+        CUSTOM_number: int,
+        float_number: float,
+        from_registered: FromRegistered,
+        from_method: FromMethod,
+        string: str,
+    ) -> ComplexClass:
+        return ComplexClass(
+            number=CUSTOM_number + 10,
+            float_number=float_number + 1.0,
+            from_registered=from_registered,
+            from_method=from_method,
+            string=string,
+            extra_argument=5,
+        )
+
+    instances = list(
+        csv_load(
+            csv_lines,
+            dataclass=ComplexClass,
+            init_function=custom_factory,
+            string_parser=string_parser_from_registered,
+        )
+    )
+    for instance, row in zip(instances, csv_rows):
+        n, f, r, m, s = row.split(",")
+        assert instance.number == int(n) + 10
+        assert instance.float_number == float(f) + 1
+        assert instance.from_registered.value == int(r)
+        assert instance.from_method.value == int(m)
+        assert instance.string == s
+        assert instance.extra_argument == 5
+
+
+def test_csv_load_dataclass_with_custom_init_and_field_names(
+    csv_lines: list[str],
+    csv_rows: list[str],
+    string_parser_from_registered: StringParser,
+) -> None:
+    """Verify `init_function` and `init_arguments` alter the resulting
+    instances as expected."""
+
+    def custom_factory_with_field_names(
+        number: int,
+        float_number: float,
+        from_registered: FromRegistered,
+        from_method: FromMethod,
+        string: str,
+    ) -> ComplexClass:
+        return ComplexClass(
+            number=number + 10,
+            float_number=float_number + 1.0,
+            from_registered=from_registered,
+            from_method=from_method,
+            string=string,
+            extra_argument=5,
+        )
+
+    instances = list(
+        csv_load(
+            csv_lines,
+            dataclass=ComplexClass,
+            init_function=custom_factory_with_field_names,
+            field_to_column_name={
+                "number": "CUSTOM_number",
+                "float_number": "float_number",
+                "from_registered": "from_registered",
+                "from_method": "from_method",
+                "string": "string",
+            },
+            string_parser=string_parser_from_registered,
+        )
+    )
+    for instance, row in zip(instances, csv_rows):
+        n, f, r, m, s = row.split(",")
+        assert instance.number == int(n) + 10
+        assert instance.float_number == float(f) + 1
+        assert instance.from_registered.value == int(r)
+        assert instance.from_method.value == int(m)
+        assert instance.string == s
+        assert instance.extra_argument == 5
+
+
+def test_csv_load_into_dict(csv_rows: list[str]) -> None:
+    """Ensure csv_load produces dicts when no dataclass is provided."""
+    header = "number,float_number,from_registered,from_method,string"
+    lines = [header, *csv_rows]
+    mapping = {"the_float": "float_number", "the_string": "string"}
+
+    with pytest.raises(ColumnSubsetError):
+        next(
+            csv_load(
+                lines, field_to_column_name=mapping, allow_column_subset=False
+            )
+        )
+
+    results = list(csv_load(lines, field_to_column_name=mapping))
+
+    for row, result in zip(csv_rows, results):
+        n, f, r, m, s = row.split(",")
+        assert result["the_float"] == f
+        assert result["the_string"] == s
+        # Only mapped + injected keys should exist
+        assert set(result.keys()) == {"the_float", "the_string"}
+
+
+def test_csv_load_missing_column_name(csv_rows: list[str]) -> None:
+    """Unknown column names should simply be skipped (converter not built)."""
+    header = "only_this"
+    result = list(csv_load([header, *csv_rows]))
+    assert all(isinstance(r, dict) for r in result)
+    assert all(
+        r == {"only_this": v.split(",")[0]} for r, v in zip(result, csv_rows)
+    )
+
+
+def test_csv_load_custom_delimiter() -> None:
+    """Verify custom delimiter works as expected."""
+    csv_data = ["a|b|c", "1|2|3"]
+    results = list(csv_load(csv_data, delimiter="|"))
+    assert results == [{"a": "1", "b": "2", "c": "3"}]
+
+
+@pytest.fixture
+def data_scores_header() -> str:
+    return "id,name,score_1,score_2,bonus_score"
+
+
+@pytest.fixture
+def data_scores_rows() -> list[str]:
+    return ["7,John Doe,97.2,79,50", "abc-123,John Doe,97.2,79,50"]
+
+
+@pytest.fixture
+def data_scores_lines(
+    data_scores_header: str, data_scores_rows: list[str]
+) -> list[str]:
+    return [data_scores_header, *data_scores_rows]
+
+
+def test_csv_load_dataclass_with_initvar_and_init_false(
+    data_scores_lines: list[str], data_scores_rows: list[str]
+) -> None:
+    @dataclass
+    class TestClass:
+        id: int | str
+        name: str
+        scores: list[float] = field(init=False, default_factory=list)
+        score_1: InitVar[float]
+        score_2: InitVar[float]
+        score_3: InitVar[float] = field(metadata={"csv_key": "bonus_score"})
+
+        def __post_init__(
+            self, score_1: float, score_2: float, score_3: float
+        ) -> None:
+            self.scores = [score_1, score_2, score_3]
+
+    instances = list(csv_load(data_scores_lines, dataclass=TestClass))
+
+    def int_or_str(value: str) -> int | str:
+        try:
+            return int(value)
+        except ValueError:
+            return value
+
+    for instance, row in zip(instances, data_scores_rows):
+        id, name, score_1, score_2, bonus_score = row.split(",")
+        assert instance.id == int_or_str(id)
+        assert instance.name == name
+        assert instance.scores == [
+            float(score_1),
+            float(score_2),
+            float(bonus_score),
+        ]
+
+
+def test_strip_json5_comments_and_trailing_commas() -> None:
+    samples = {
+        '{"a": "simple", // comment\n "b": "text",}': {
+            "a": "simple",
+            "b": "text",
+        },
+        '{"q": "has quote: \\"inner\\"", "x": 1,}': {
+            "q": 'has quote: "inner"',
+            "x": 1,
+        },
+        '{"b": "escaped backslash: \\\\", "y": 2, // comment\n}': {
+            "b": "escaped backslash: \\",
+            "y": 2,
+        },
+        """
+        {
+            "msg": "Line1\\nLine2", // multi-line escape
+            "num": 5,
+        }
+        """: {
+            "msg": "Line1\nLine2",
+            "num": 5,
+        },
+    }
+
+    for src, expected_obj in samples.items():
+        parsed = json5_load(src)
+        assert parsed == expected_obj, (
+            f"\nInput:\n{src}"
+            f"\nParsed:\n{parsed}"
+            f"\nExpected:\n{expected_obj}"
+        )
