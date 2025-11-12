@@ -33,7 +33,7 @@ def iterate_types(*source_types: type | UnionType) -> Iterator[type]:
 
 def verified_cast(expected_type: type[T] | UnionType, value: Any) -> T:
     for candidate_type in iterate_types(expected_type):
-        if isinstance(value, candidate_type):
+        if candidate_type is Any or isinstance(value, candidate_type):
             return cast(T, value)
     raise TypeError(
         f"Expected: {expected_type}, Actual: {type(value)}, Value: {value}"
