@@ -1,15 +1,153 @@
 from __future__ import annotations
 
+import io
 from dataclasses import InitVar, dataclass, field
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from sevaht_utility.parsing import (
     ColumnSubsetError,
+    StringConverter,
     StringParser,
     csv_load,
+    get_text,
     json5_load,
+    open_text,
+    parse_bool,
 )
+
+
+def test_get_text_from_string() -> None:
+    assert get_text("abc") == "abc"
+
+
+def test_get_text_from_list() -> None:
+    lines = ["a", "b", "c"]
+    result = get_text(lines)
+    # should join with os.linesep
+    assert "a" in result and "b" in result and "c" in result
+    assert result.count("\n") == 2 or result.count("\r\n") == 2
+
+
+def test_get_text_from_path(tmp_path: Path) -> None:
+    p = tmp_path / "sample.txt"
+    p.write_text("hello world", encoding="utf-8")
+    assert get_text(p) == "hello world"
+
+
+def test_get_text_from_textio() -> None:
+    s = io.StringIO("xyz")
+    assert get_text(s) == "xyz"
+
+
+def test_open_text_with_path(tmp_path: Path) -> None:
+    p = tmp_path / "file.txt"
+    p.write_text("content")
+    with open_text(p) as f:
+        assert f.read() == "content"
+
+
+def test_open_text_with_string() -> None:
+    with open_text("abc") as f:
+        assert f.read() == "abc"
+
+
+def test_open_text_with_list() -> None:
+    with open_text(["x", "y"]) as f:
+        text = f.read()
+    assert "x" in text and "y" in text
+
+
+def test_open_text_with_textio() -> None:
+    s = io.StringIO("something")
+    with open_text(s) as f:
+        assert f is s  # should yield same object
+        assert f.read() == "something"
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("1", True),
+        ("true", True),
+        ("yes", True),
+        ("0", False),
+        ("no", False),
+        ("FALSE", False),
+        ("TrUe", True),
+    ],
+)
+def test_parse_bool_various(value: str, expected: bool) -> None:
+    assert parse_bool(value) is expected
+
+
+def test_stringparser_default_converters_include_basic_types() -> None:
+    parser = StringParser.default()
+    converters = parser.converters(int)
+    assert any(conv is int for conv, _ in converters)
+
+
+def test_stringparser_handles_from_string_classmethod() -> None:
+    @dataclass
+    class Custom:
+        value: int
+
+        @classmethod
+        def from_string(cls, value: str) -> Custom:
+            return cls(int(value))
+
+    parser = StringParser()
+    result = parser.parse("42", target=Custom)
+    assert isinstance(result, Custom)
+    assert result.value == 42
+
+
+def test_stringparser_with_custom_registered_converter() -> None:
+    class Custom:
+        def __init__(self, s: str) -> None:
+            self.value = int(s) + 1
+
+    def custom_conv(s: str) -> Custom:
+        return Custom(s)
+
+    parser = StringParser()
+    parser.set_converter(Custom, converter=custom_conv)
+    result = parser.parse("9", target=Custom)
+    assert result.value == 10
+
+
+def test_stringparser_fallback_raises() -> None:
+    class Bad:
+        pass
+
+    parser = StringParser()
+    with pytest.raises(TypeError):
+        parser.parse("text", target=Bad)
+
+
+def test_stringparser_first_valid_conversion_picks_first() -> None:
+    converters = [(int, int), (float, float)]
+    result = StringParser.first_valid_conversion("7", converters=converters)
+    assert result == 7
+
+
+def test_stringparser_first_valid_conversion_skips_failures(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def fail_conv(_: str) -> int:
+        raise ValueError("bad")
+
+    converters: list[tuple[StringConverter, type[Any]]] = [
+        (fail_conv, int),
+        (float, float),
+    ]
+    result = StringParser.first_valid_conversion("3.14", converters=converters)
+    assert result == 3.14
+    assert any(
+        "Failed to convert" in line for line in caplog.text.splitlines()
+    )
 
 
 @dataclass
@@ -288,6 +426,19 @@ def test_csv_load_dataclass_with_initvar_and_init_false(
         ]
 
 
+def test_csv_load_with_repeated_headers_is_ok(tmp_path: Path) -> None:
+    data = ["a,a,b", "1,2,3"]
+    results = list(csv_load(data))
+    assert isinstance(results[0], dict)
+    assert set(results[0].keys()) == {"a", "b"}
+
+
+def test_csv_load_with_empty_file_yields_nothing(tmp_path: Path) -> None:
+    p = tmp_path / "empty.csv"
+    p.write_text("")
+    assert list(csv_load(p)) == []
+
+
 def test_strip_json5_comments_and_trailing_commas() -> None:
     samples = {
         '{"a": "simple", // comment\n "b": "text",}': {
@@ -320,3 +471,19 @@ def test_strip_json5_comments_and_trailing_commas() -> None:
             f"\nParsed:\n{parsed}"
             f"\nExpected:\n{expected_obj}"
         )
+
+
+def test_json5_load_with_empty_object() -> None:
+    assert json5_load("{}") == {}
+
+
+def test_json5_load_ignores_comments_inside_strings() -> None:
+    text = '{"key": "// not a comment"}'
+    result = json5_load(text)
+    assert result == {"key": "// not a comment"}
+
+
+def test_json5_load_trailing_comma_in_array() -> None:
+    text = '{"arr": [1,2,3,], "x": 5,}'
+    result = json5_load(text)
+    assert result == {"arr": [1, 2, 3], "x": 5}

@@ -196,7 +196,12 @@ def csv_load(
         if string_parser is None:
             string_parser = StringParser.default()
         if column_names is None:
-            column_names = next(reader)
+            try:
+                column_names = next(reader)
+            except StopIteration:
+                logger.debug("No column names provided and source is empty.")
+                return
+
         if init_function is not None:
             type_hints = get_callable_argument_hints(init_function)
             if field_to_column_name is None:
