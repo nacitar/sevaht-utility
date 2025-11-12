@@ -63,7 +63,7 @@ def parse_bool(value: str) -> bool:
 @cache
 def default_string_converters() -> Mapping[type[Any], StringConverter]:
     return MappingProxyType(
-        {str: str, int: int, float: float, bool: parse_bool}
+        {Any: str, str: str, int: int, float: float, bool: parse_bool}
     )
 
 
