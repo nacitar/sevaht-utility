@@ -180,7 +180,7 @@ class FromMethod:
 
 @dataclass
 class ComplexClass:
-    number: int = field(metadata={"csv_key": "CUSTOM_number"})
+    number: int = field(metadata={"csv_key": "custom_number"})
     float_number: float
     from_registered: FromRegistered
     from_method: FromMethod
@@ -190,7 +190,7 @@ class ComplexClass:
 
 @pytest.fixture
 def csv_header() -> str:
-    return "CUSTOM_number,float_number,from_registered,from_method,string"
+    return "custom_number,float_number,from_registered,from_method,string"
 
 
 @pytest.fixture
@@ -251,14 +251,14 @@ def test_csv_load_dataclass_with_custom_init(
     instances as expected."""
 
     def custom_factory(
-        CUSTOM_number: int,
+        custom_number: int,
         float_number: float,
         from_registered: FromRegistered,
         from_method: FromMethod,
         string: str,
     ) -> ComplexClass:
         return ComplexClass(
-            number=CUSTOM_number + 10,
+            number=custom_number + 10,
             float_number=float_number + 1.0,
             from_registered=from_registered,
             from_method=from_method,
@@ -314,7 +314,7 @@ def test_csv_load_dataclass_with_custom_init_and_field_names(
             dataclass=ComplexClass,
             init_function=custom_factory_with_field_names,
             field_to_column_name={
-                "number": "CUSTOM_number",
+                "number": "custom_number",
                 "float_number": "float_number",
                 "from_registered": "from_registered",
                 "from_method": "from_method",
