@@ -15,7 +15,7 @@ def main() -> int:
         (["mypy", "--scripts-are-modules"] + scripts, "typechecking scripts"),
         (["mypy", "."], "typechecking package"),
         (["flake8", "."] + scripts, "linting"),
-        (["pytest", "."], "executing tests"),
+        (["pytest"], "executing tests"),
     ]
     for command, description in commands:
         print(f"Running {command[0]}... ({description})")

@@ -38,3 +38,6 @@ strict = true
 
 [tool.poetry.scripts]
 sevaht-utility = "sevaht_utility.__main__:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
