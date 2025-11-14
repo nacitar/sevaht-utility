@@ -73,7 +73,7 @@ def configure_logging_custom(
         )
         logging.getLogger().addHandler(file_handler)
     logging.getLogger().setLevel(global_level)
-    logging.info("logging configured")
+    logger.info("logging configured")
 
 
 def add_log_arguments(parser: argparse.ArgumentParser) -> None:

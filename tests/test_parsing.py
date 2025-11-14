@@ -426,7 +426,7 @@ def test_csv_load_dataclass_with_initvar_and_init_false(
         ]
 
 
-def test_csv_load_with_repeated_headers_is_ok(tmp_path: Path) -> None:
+def test_csv_load_with_repeated_headers_is_ok() -> None:
     data = ["a,a,b", "1,2,3"]
     results = list(csv_load(data))
     assert isinstance(results[0], dict)

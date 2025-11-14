@@ -65,7 +65,7 @@ def test_verified_cast_with_union_and_subtypes() -> None:
 # --- get_callable_argument_hints ---------------------------------------------
 
 
-def _example_func(a: int, b: str, c: InitVar[float]) -> bool:
+def _example_func(a: int, b: str, c: InitVar[float]) -> bool:  # noqa: ARG001
     return True
 
 

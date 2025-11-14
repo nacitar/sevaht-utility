@@ -138,7 +138,9 @@ class StringParser:
         for converter, converter_type in converters:
             try:
                 return verified_cast(converter_type, converter(source))
-            except Exception:
+            except Exception:  # noqa: BLE001
+                # catching bare exception because user-provided converters may
+                # raise anything; this code cannot control that.
                 logger.debug(
                     f"Failed to convert to {converter_type}: {source}"
                 )
