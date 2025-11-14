@@ -348,7 +348,7 @@ def test_csv_load_into_dict(csv_rows: list[str]) -> None:
     results = list(csv_load(lines, field_to_column_name=mapping))
 
     for row, result in zip(csv_rows, results, strict=True):
-        n, f, r, m, s = row.split(",")
+        _, f, _, _, s = row.split(",")
         assert result["the_float"] == f
         assert result["the_string"] == s
         # Only mapped + injected keys should exist

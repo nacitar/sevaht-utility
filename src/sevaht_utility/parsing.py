@@ -6,13 +6,7 @@ import logging
 import os
 import re
 import threading
-from collections.abc import (
-    Callable,  # noqa: TC003
-    Iterable,
-    Iterator,
-    Mapping,
-    Sequence,
-)
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, is_dataclass
 from functools import cache
