@@ -468,11 +468,9 @@ def test_strip_json5_comments_and_trailing_commas() -> None:
 
     for src, expected_obj in samples.items():
         parsed = json5_load(src)
-        assert parsed == expected_obj, (
-            f"\nInput:\n{src}"
-            f"\nParsed:\n{parsed}"
-            f"\nExpected:\n{expected_obj}"
-        )
+        assert (
+            parsed == expected_obj
+        ), f"\nInput:\n{src}\nParsed:\n{parsed}\nExpected:\n{expected_obj}"
 
 
 def test_json5_load_with_empty_object() -> None:
