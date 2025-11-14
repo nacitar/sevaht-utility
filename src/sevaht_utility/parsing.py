@@ -6,32 +6,33 @@ import logging
 import os
 import re
 import threading
+from collections.abc import Callable  # noqa: TC003
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, is_dataclass
 from functools import cache
 from io import StringIO
 from pathlib import Path
 from types import MappingProxyType
-from typing import (
-    Any,
-    Callable,
-    Iterable,
-    Iterator,
-    Mapping,
-    Sequence,
-    TextIO,
-    TypeVar,
-    cast,
-    overload,
-)
+from typing import Any, TextIO, TypeAlias, TypeVar, cast, overload
 
 from .hinting import get_callable_argument_hints, iterate_types, verified_cast
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-TextProvider = str | Path | TextIO | list[str]
-StringConverter = Callable[[str], Any]
+TextProvider: TypeAlias = str | Path | TextIO | list[str]
+StringConverter: TypeAlias = Callable[[str], object]
+# NOTE: must quote recursive type aliases even with future annotations
+JsonValue: TypeAlias = (
+    dict[str, "JsonValue"]
+    | list["JsonValue"]
+    | str
+    | int
+    | float
+    | bool
+    | None
+)
 
 
 def get_text(source: TextProvider) -> str:
@@ -102,12 +103,12 @@ class StringParser:
         return converters
 
     def parse(self, source: TextProvider, *, target: type[T]) -> T:
-        # first_valid_conversion verifies the cast to the specific type
+        # first_valid_conversion verifies the cast to a specific type
         # whereas T might be a Union here.
         source = get_text(source)
         try:
             return cast(
-                T,
+                "T",
                 type(self).first_valid_conversion(
                     source, converters=self.converters(target)
                 ),
@@ -121,7 +122,7 @@ class StringParser:
         source: TextProvider,
         *,
         converters: Iterable[tuple[StringConverter, type[Any]]],
-    ) -> Any:
+    ) -> object:
         source = get_text(source)
         for converter, converter_type in converters:
             try:
@@ -144,7 +145,7 @@ class ColumnSubsetError(Exception):
     pass
 
 
-@overload
+@overload  # dict case, no init_function for type hints; dict[str, str]
 def csv_load(
     source: TextProvider,
     *,
@@ -153,19 +154,34 @@ def csv_load(
     dataclass: None = ...,
     field_metadata_key: str = ...,
     field_to_column_name: Mapping[str, str] | None = ...,
-    init_function: Callable[..., dict[str, str]] | None = ...,
+    init_function: None = None,
     allow_column_subset: bool = ...,
     string_parser: StringParser | None = ...,
 ) -> Iterator[dict[str, str]]: ...
 
 
-@overload
+@overload  # dict case, YES init_function for type hints; dict[str, object]
 def csv_load(
     source: TextProvider,
     *,
     delimiter: str = ...,
     column_names: Sequence[str] | None = ...,
-    dataclass: type[T] = ...,
+    dataclass: None = None,
+    field_metadata_key: str = ...,
+    field_to_column_name: Mapping[str, str] | None = ...,
+    init_function: Callable[..., dict[str, object]],  # REQUIRED
+    allow_column_subset: bool = ...,
+    string_parser: StringParser | None = ...,
+) -> Iterator[dict[str, object]]: ...
+
+
+@overload  # dataclass case
+def csv_load(
+    source: TextProvider,
+    *,
+    delimiter: str = ...,
+    column_names: Sequence[str] | None = ...,
+    dataclass: type[T],  # REQUIRED
     field_metadata_key: str = ...,
     field_to_column_name: Mapping[str, str] | None = ...,
     init_function: Callable[..., T] | None = ...,
@@ -182,10 +198,10 @@ def csv_load(
     dataclass: type[T] | None = None,
     field_metadata_key: str = "csv_key",
     field_to_column_name: Mapping[str, str] | None = None,
-    init_function: Callable[..., T | dict[str, str]] | None = None,
+    init_function: Callable[..., object] | None = None,
     allow_column_subset: bool = True,
     string_parser: StringParser | None = None,
-) -> Iterator[T] | Iterator[dict[str, str]]:
+) -> Iterator[T] | Iterator[dict[str, str]] | Iterator[dict[str, object]]:
     """Load CSV data into dicts or dataclass instances.
 
     For custom field types, a classmethod `from_string(cls, s: str)` may be
@@ -214,26 +230,27 @@ def csv_load(
                 raise TypeError(
                     f"dataclass argument isn't a dataclass: {dataclass}"
                 )
-            if init_function is None:
-                init_function = dataclass
-            if type_hints is None:
-                type_hints = get_callable_argument_hints(dataclass)
-            if field_to_column_name is None:
-                field_to_column_name = {
-                    name: dataclass.__dataclass_fields__[name].metadata.get(
-                        field_metadata_key, name
-                    )
-                    for name in type_hints
-                }
+            init_function = cast(
+                "Callable[..., T]", init_function or dataclass
+            )
+            type_hints = type_hints or get_callable_argument_hints(dataclass)
+            field_to_column_name = field_to_column_name or {
+                name: dataclass.__dataclass_fields__[name].metadata.get(
+                    field_metadata_key, name
+                )
+                for name in type_hints
+            }
         else:
             if init_function is None:
-                init_function = dict
-            if type_hints is None:
-                type_hints = {}
-            if field_to_column_name is None:
-                field_to_column_name = {
-                    column_name: column_name for column_name in column_names
-                }
+                init_function = cast("Callable[..., dict[str, str]]", dict)
+            else:
+                init_function = cast(
+                    "Callable[..., dict[str, object]]", init_function
+                )
+            type_hints = type_hints or {}
+            field_to_column_name = field_to_column_name or {
+                column_name: column_name for column_name in column_names
+            }
 
         field_to_index_and_converters = {
             field_name: (
@@ -282,11 +299,13 @@ _JSON5_COMMENT_PATTERN = re.compile(
 )
 
 
-def json5_load(source: TextProvider) -> Any:
+def json5_load(source: TextProvider) -> JsonValue:
     def comment_replacer(match: re.Match[str]) -> str:
         return match.group(1) or match.group(2) or ""
 
     no_comments = _JSON5_COMMENT_PATTERN.sub(
         comment_replacer, get_text(source)
     )
-    return json.loads(re.sub(r",(?=\s*[\]}])", "", no_comments))
+    return cast(
+        "JsonValue", json.loads(re.sub(r",(?=\s*[\]}])", "", no_comments))
+    )

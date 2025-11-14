@@ -14,7 +14,7 @@ def main() -> int:
         (["isort", "."] + scripts, "sorting imports"),
         (["mypy", "--scripts-are-modules"] + scripts, "typechecking scripts"),
         (["mypy", "."], "typechecking package"),
-        (["flake8", "."] + scripts, "linting"),
+        (["ruff", "check", "."] + scripts, "linting"),
         (["pytest"], "executing tests"),
     ]
     for command, description in commands:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import InitVar
+from dataclasses import InitVar  # noqa: TC003
 from typing import Any, Union
 
 import pytest
@@ -16,7 +16,9 @@ from sevaht_utility.hinting import (
 
 def test_iterate_types_flattening() -> None:
     # Mixed PEP 604 and typing.Union
-    result = list(iterate_types(int | float | Union[str, bytes] | list))
+    result = list(
+        iterate_types(int | float | Union[str, bytes] | list)  # noqa: UP007
+    )
     assert result == [int, float, str, bytes, list]
 
 
@@ -66,7 +68,9 @@ def _example_func(a: int, b: str, c: InitVar[float]) -> bool:
     return True
 
 
-def _example_func_no_annotations(x, y):  # type: ignore[no-untyped-def]
+def _example_undecorated_func(  # type: ignore[no-untyped-def]  # noqa: ANN202
+    x, y  # noqa: ANN001
+):
     pass
 
 
@@ -80,7 +84,7 @@ def test_get_callable_argument_hints_ignores_return() -> None:
 
 
 def test_get_callable_argument_hints_handles_unannotated() -> None:
-    hints = get_callable_argument_hints(_example_func_no_annotations)
+    hints = get_callable_argument_hints(_example_undecorated_func)
     assert hints == {"x": Any, "y": Any}
 
 

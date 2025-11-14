@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import io
 from dataclasses import InitVar, dataclass, field
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -17,6 +16,9 @@ from sevaht_utility.parsing import (
     open_text,
     parse_bool,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_get_text_from_string() -> None:

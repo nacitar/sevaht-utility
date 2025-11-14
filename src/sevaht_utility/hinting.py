@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import InitVar
+from dataclasses import InitVar  # noqa: TC003
 from inspect import signature
 from types import UnionType
 from typing import (
+    TYPE_CHECKING,
     Any,
-    Callable,
-    Iterator,
     TypeVar,
     Union,
     cast,
@@ -15,6 +14,10 @@ from typing import (
     get_origin,
     get_type_hints,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
 
 T = TypeVar("T")
 
@@ -31,10 +34,12 @@ def iterate_types(*source_types: type | UnionType) -> Iterator[type]:
             yield current
 
 
-def verified_cast(expected_type: type[T] | UnionType, value: Any) -> T:
+def verified_cast(expected_type: type[T] | UnionType, value: object) -> T:
     for candidate_type in iterate_types(expected_type):
-        if candidate_type is Any or isinstance(value, candidate_type):
-            return cast(T, value)
+        if candidate_type in (Any, object) or isinstance(
+            value, candidate_type
+        ):
+            return cast("T", value)
     raise TypeError(
         f"Expected: {expected_type}, Actual: {type(value)}, Value: {value}"
     )

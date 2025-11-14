@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-import argparse
 import logging
+import sys
+from contextlib import contextmanager
 from dataclasses import KW_ONLY, dataclass
 from logging import Handler
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    import argparse
+    from collections.abc import Iterator
 logger = logging.getLogger(__name__)
 
 
@@ -126,3 +131,33 @@ def configure_logging(
             )
         ),
     )
+
+
+def is_console_handler(handler: logging.Handler) -> bool:
+    if not isinstance(handler, logging.StreamHandler):
+        return False
+
+    return handler.stream in (sys.stdout, sys.stderr)
+
+
+@contextmanager
+def suppress_console_logging() -> Iterator[None]:
+    """
+    Temporarily remove logging handlers that write to the terminal.
+
+    This affects only StreamHandlers whose stream is sys.stdout or sys.stderr.
+    Other handlers (file, syslog, HTTP, custom streams) remain intact.
+
+    All removed handlers are restored after the context exits.
+    """
+    root_logger = logging.getLogger()
+    removed_handlers: list[logging.Handler] = []
+    try:
+        for handler in list(root_logger.handlers):
+            if is_console_handler(handler):
+                root_logger.removeHandler(handler)
+                removed_handlers.append(handler)
+        yield
+    finally:
+        for handler in removed_handlers:
+            root_logger.addHandler(handler)
