@@ -139,7 +139,7 @@ def test_stringparser_first_valid_conversion_picks_first() -> None:
 
 def test_stringparser_first_valid_conversion_skips_failures() -> None:
     def fail_conv(_: str) -> int:
-        raise ValueError("bad")
+        raise ValueError
 
     converters: list[tuple[StringConverter, type[Any]]] = [
         (fail_conv, int),
