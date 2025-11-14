@@ -11,7 +11,10 @@ def main() -> int:
     scripts = [this_script.name]
     commands = [
         (["black", "."] + scripts, "formatting code"),
-        (["isort", "."] + scripts, "sorting imports"),
+        (
+            ["ruff", "check", "--fix", "--select", "I", "."] + scripts,
+            "sorting imports",
+        ),
         (["mypy", "--scripts-are-modules"] + scripts, "typechecking scripts"),
         (["mypy", "."], "typechecking package"),
         (["ruff", "check", "."] + scripts, "linting"),

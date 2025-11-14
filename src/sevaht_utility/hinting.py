@@ -22,6 +22,21 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
+class InvalidTypeError(TypeError):
+    """Raised when a value's type does not match the expected type."""
+
+    def __init__(
+        self, value: object, *, expected_type: type[T] | UnionType
+    ) -> None:
+        super().__init__(
+            f"Expected: {expected_type}, "
+            f"Actual: {type(value)}, "
+            f"Value: {value}"
+        )
+        self.expected_type = expected_type
+        self.value = value
+
+
 def iterate_types(*source_types: type | UnionType) -> Iterator[type]:
     stack = deque(source_types)
     seen: set[type] = set()
@@ -40,9 +55,7 @@ def verified_cast(expected_type: type[T] | UnionType, value: object) -> T:
             value, candidate_type
         ):
             return cast("T", value)
-    raise TypeError(
-        f"Expected: {expected_type}, Actual: {type(value)}, Value: {value}"
-    )
+    raise InvalidTypeError(value, expected_type=expected_type)
 
 
 def get_callable_argument_hints(
@@ -58,6 +71,6 @@ def get_callable_argument_hints(
     }
     return {
         member: type_hints.get(member, Any)
-        for member in signature(function).parameters.keys()
+        for member in signature(function).parameters
         if member != "return"
     }

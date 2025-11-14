@@ -6,6 +6,7 @@ from typing import Any, Union
 import pytest
 
 from sevaht_utility.hinting import (
+    InvalidTypeError,
     get_callable_argument_hints,
     iterate_types,
     verified_cast,
@@ -46,7 +47,7 @@ def test_verified_cast_accepts_valid_type() -> None:
 
 
 def test_verified_cast_rejects_invalid_type() -> None:
-    with pytest.raises(TypeError):
+    with pytest.raises(InvalidTypeError):
         verified_cast(int | str, 1.2)
 
 

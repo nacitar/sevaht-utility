@@ -16,7 +16,6 @@ packages = [{include = "sevaht_utility", from = "src"}]
 
 [tool.poetry.group.dev.dependencies]
 black = "^25.11.0"
-isort = "^6.1.0"
 mypy = "^1.18.2"
 pytest = "^8.4.2"
 ruff = "^0.14.5"
@@ -47,4 +46,7 @@ line-length = 79
 
 [tool.ruff.lint]
 extend-ignore = ["E203", "E501"]
-select = ["E", "F", "N", "UP", "ANN", "TCH"]
+select = [
+    "E", "F", "N", "UP", "ANN", "TCH",
+    "A", "I", "C4", "B", "SIM", "PERF", "PTH", "RET", "TRY", "Q"
+]

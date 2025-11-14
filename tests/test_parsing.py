@@ -7,9 +7,11 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from sevaht_utility.parsing import (
-    ColumnSubsetError,
+    NotADataclassError,
     StringConverter,
     StringParser,
+    StringParserError,
+    UnconsumedColumnsError,
     csv_load,
     get_text,
     json5_load,
@@ -125,7 +127,7 @@ def test_stringparser_fallback_raises() -> None:
         pass
 
     parser = StringParser()
-    with pytest.raises(TypeError):
+    with pytest.raises(StringParserError):
         parser.parse("text", target=Bad)
 
 
@@ -135,9 +137,7 @@ def test_stringparser_first_valid_conversion_picks_first() -> None:
     assert result == 7
 
 
-def test_stringparser_first_valid_conversion_skips_failures(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_stringparser_first_valid_conversion_skips_failures() -> None:
     def fail_conv(_: str) -> int:
         raise ValueError("bad")
 
@@ -147,9 +147,6 @@ def test_stringparser_first_valid_conversion_skips_failures(
     ]
     result = StringParser.first_valid_conversion("3.14", converters=converters)
     assert result == 3.14
-    assert any(
-        "Failed to convert" in line for line in caplog.text.splitlines()
-    )
 
 
 @dataclass
@@ -225,7 +222,7 @@ def test_csv_load_into_dataclass(
     )
     assert len(instances) == len(csv_rows)
 
-    for instance, row in zip(instances, csv_rows):
+    for instance, row in zip(instances, csv_rows, strict=True):
         n, f, r, m, s = row.split(",")
         assert instance.number == int(n)
         assert instance.float_number == float(f)
@@ -240,7 +237,7 @@ def test_csv_load_raises_if_not_dataclass(csv_lines: list[str]) -> None:
     class NotADataClass:
         pass
 
-    with pytest.raises(TypeError, match="isn't a dataclass"):
+    with pytest.raises(NotADataclassError, match="isn't a dataclass"):
         list(csv_load(csv_lines, dataclass=NotADataClass))
 
 
@@ -276,7 +273,7 @@ def test_csv_load_dataclass_with_custom_init(
             string_parser=string_parser_from_registered,
         )
     )
-    for instance, row in zip(instances, csv_rows):
+    for instance, row in zip(instances, csv_rows, strict=True):
         n, f, r, m, s = row.split(",")
         assert instance.number == int(n) + 10
         assert instance.float_number == float(f) + 1
@@ -325,7 +322,7 @@ def test_csv_load_dataclass_with_custom_init_and_field_names(
             string_parser=string_parser_from_registered,
         )
     )
-    for instance, row in zip(instances, csv_rows):
+    for instance, row in zip(instances, csv_rows, strict=True):
         n, f, r, m, s = row.split(",")
         assert instance.number == int(n) + 10
         assert instance.float_number == float(f) + 1
@@ -341,7 +338,7 @@ def test_csv_load_into_dict(csv_rows: list[str]) -> None:
     lines = [header, *csv_rows]
     mapping = {"the_float": "float_number", "the_string": "string"}
 
-    with pytest.raises(ColumnSubsetError):
+    with pytest.raises(UnconsumedColumnsError):
         next(
             csv_load(
                 lines, field_to_column_name=mapping, allow_column_subset=False
@@ -350,7 +347,7 @@ def test_csv_load_into_dict(csv_rows: list[str]) -> None:
 
     results = list(csv_load(lines, field_to_column_name=mapping))
 
-    for row, result in zip(csv_rows, results):
+    for row, result in zip(csv_rows, results, strict=True):
         n, f, r, m, s = row.split(",")
         assert result["the_float"] == f
         assert result["the_string"] == s
@@ -364,7 +361,8 @@ def test_csv_load_missing_column_name(csv_rows: list[str]) -> None:
     result = list(csv_load([header, *csv_rows]))
     assert all(isinstance(r, dict) for r in result)
     assert all(
-        r == {"only_this": v.split(",")[0]} for r, v in zip(result, csv_rows)
+        r == {"only_this": v.split(",")[0]}
+        for r, v in zip(result, csv_rows, strict=True)
     )
 
 
@@ -417,9 +415,9 @@ def test_csv_load_dataclass_with_initvar_and_init_false(
         except ValueError:
             return value
 
-    for instance, row in zip(instances, data_scores_rows):
-        id, name, score_1, score_2, bonus_score = row.split(",")
-        assert instance.id == int_or_str(id)
+    for instance, row in zip(instances, data_scores_rows, strict=True):
+        id_, name, score_1, score_2, bonus_score = row.split(",")
+        assert instance.id == int_or_str(id_)
         assert instance.name == name
         assert instance.scores == [
             float(score_1),

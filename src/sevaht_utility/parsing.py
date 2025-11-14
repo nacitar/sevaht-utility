@@ -6,14 +6,19 @@ import logging
 import os
 import re
 import threading
-from collections.abc import Callable  # noqa: TC003
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import (
+    Callable,  # noqa: TC003
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from contextlib import contextmanager
 from dataclasses import dataclass, field, is_dataclass
 from functools import cache
 from io import StringIO
 from pathlib import Path
-from types import MappingProxyType
+from types import MappingProxyType, UnionType
 from typing import Any, TextIO, TypeAlias, TypeVar, cast, overload
 
 from .hinting import get_callable_argument_hints, iterate_types, verified_cast
@@ -68,6 +73,18 @@ def default_string_converters() -> Mapping[type[Any], StringConverter]:
     )
 
 
+class StringParserError(TypeError):
+    def __init__(self, value: object) -> None:
+        super().__init__(f"Could not parse string: {value}")
+        self.value = value
+
+
+class StringConverterError(TypeError):
+    def __init__(self, value: object) -> None:
+        super().__init__(f"Could not parse string: {value}")
+        self.value = value
+
+
 @dataclass
 class StringParser:
     _CONVERTERS: dict[type[Any], StringConverter] = field(
@@ -83,7 +100,7 @@ class StringParser:
         return StringParser()
 
     def converters(
-        self, target: type[Any]
+        self, target: type[Any] | UnionType
     ) -> list[tuple[StringConverter, type[Any]]]:
         converters: list[tuple[StringConverter, type[Any]]] = []
         with self._CONVERTER_LOCK:
@@ -113,7 +130,7 @@ class StringParser:
                     source, converters=self.converters(target)
                 ),
             )
-        except TypeError:
+        except StringParserError:
             logger.exception(f"Could not parse to {target}: {source}")
             raise
 
@@ -128,21 +145,32 @@ class StringParser:
             try:
                 return verified_cast(converter_type, converter(source))
             except Exception:
-                logger.exception(
+                logger.debug(
                     f"Failed to convert to {converter_type}: {source}"
                 )
-        raise TypeError(f"No converters worked for source: {source}")
+        raise StringParserError(source)
 
     def set_converter(
         self, target: type[T], *, converter: StringConverter
     ) -> None:
         with self._CONVERTER_LOCK:
             for candidate_type in iterate_types(target):
-                self._CONVERTERS[target] = converter
+                self._CONVERTERS[candidate_type] = converter
 
 
-class ColumnSubsetError(Exception):
-    pass
+class UnconsumedColumnsError(Exception):
+    def __init__(self, columns: Sequence[str]) -> None:
+        super().__init__(
+            f"{len(columns)} columns were not consumed: {', '.join(columns)}"
+        )
+
+
+class NotADataclassError(TypeError):
+    """Raised when an argument expected to be a dataclass is not one."""
+
+    def __init__(self, obj: object) -> None:
+        super().__init__(f"Dataclass argument isn't a dataclass: {obj}")
+        self.obj = obj
 
 
 @overload  # dict case, no init_function for type hints; dict[str, str]
@@ -227,9 +255,7 @@ def csv_load(
         column_indices = {name: i for i, name in enumerate(column_names)}
         if dataclass is not None:
             if not is_dataclass(dataclass):
-                raise TypeError(
-                    f"dataclass argument isn't a dataclass: {dataclass}"
-                )
+                raise NotADataclassError(dataclass)
             init_function = cast(
                 "Callable[..., T]", init_function or dataclass
             )
@@ -260,14 +286,20 @@ def csv_load(
             for field_name, column_name in field_to_column_name.items()
             if (index := column_indices.get(column_name)) is not None
         }
-        if len(field_to_column_name) < len(column_names):
-            message = (
-                f"Only {len(field_to_index_and_converters)} fields"
-                f" read of the {len(column_names)} present in CSV data."
-            )
-            logger.debug(message)
+        if len(field_to_index_and_converters) < len(column_names):
+            consumed_indices = {
+                i for i, _ in field_to_index_and_converters.values()
+            }
+            unconsumed_column_names = [
+                name
+                for i, name in enumerate(column_names)
+                if i not in consumed_indices
+            ]
+
+            error = UnconsumedColumnsError(unconsumed_column_names)
+            logger.debug(str(error))
             if not allow_column_subset:
-                raise ColumnSubsetError(message)
+                raise error
         yield from (
             init_function(
                 **{
