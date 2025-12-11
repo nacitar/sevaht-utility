@@ -231,15 +231,11 @@ def csv_load(
     For custom field types, a classmethod `from_string(cls, s: str)` may be
     implemented to control how an instance is created from a CSV cell string.
     """
-    if mapping is None:
-        mapping = DataMapping()
-    if options is None:
-        options = CsvLoadOptions()
+    mapping = mapping or DataMapping()
+    options = options or CsvLoadOptions()
     with open_text(source) as source_io:
         reader = csv.reader(source_io, delimiter=options.delimiter)
-        string_parser = options.string_parser
-        if string_parser is None:
-            string_parser = StringParser.default()
+        string_parser = options.string_parser or StringParser.default()
         column_names = mapping.column_names
         if column_names is None:
             try:
