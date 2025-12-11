@@ -9,7 +9,6 @@ from typing import (
     Any,
     TypeVar,
     Union,
-    cast,
     get_args,
     get_origin,
     get_type_hints,
@@ -49,12 +48,12 @@ def iterate_types(*source_types: type | UnionType) -> Iterator[type]:
             yield current
 
 
-def verified_cast(expected_type: type[T] | UnionType, value: object) -> T:
+def verify_type(expected_type: type | UnionType, value: T) -> T:
     for candidate_type in iterate_types(expected_type):
         if candidate_type in (Any, object) or isinstance(
             value, candidate_type
         ):
-            return cast("T", value)
+            return value
     raise InvalidTypeError(value, expected_type=expected_type)
 
 

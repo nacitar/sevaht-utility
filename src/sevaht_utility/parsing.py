@@ -15,7 +15,7 @@ from pathlib import Path
 from types import MappingProxyType, UnionType
 from typing import Any, TextIO, TypeAlias, TypeVar, cast, overload
 
-from .hinting import get_callable_argument_hints, iterate_types, verified_cast
+from .hinting import get_callable_argument_hints, iterate_types, verify_type
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +137,7 @@ class StringParser:
         source = get_text(source)
         for converter, converter_type in converters:
             try:
-                return verified_cast(converter_type, converter(source))
+                return verify_type(converter_type, converter(source))
             except Exception:  # noqa: BLE001
                 # catching bare exception because user-provided converters may
                 # raise anything; this code cannot control that.
@@ -169,18 +169,30 @@ class NotADataclassError(TypeError):
         self.obj = obj
 
 
+@dataclass
+class DataMapping:
+    column_names: Sequence[str] | None = None
+    field_to_column_name: Mapping[str, str] | None = None
+
+
+@dataclass
+class CsvLoadOptions:
+    delimiter: str = ","
+    field_metadata_key: str = "csv_key"
+    allow_column_subset: bool = True
+    string_parser: StringParser = field(
+        default_factory=lambda: StringParser.default()
+    )
+
+
 @overload  # dict case, no init_function for type hints; dict[str, str]
 def csv_load(
     source: TextProvider,
     *,
-    delimiter: str = ...,
-    column_names: Sequence[str] | None = ...,
     dataclass: None = ...,
-    field_metadata_key: str = ...,
-    field_to_column_name: Mapping[str, str] | None = ...,
     init_function: None = None,
-    allow_column_subset: bool = ...,
-    string_parser: StringParser | None = ...,
+    mapping: DataMapping | None = ...,
+    options: CsvLoadOptions | None = ...,
 ) -> Iterator[dict[str, str]]: ...
 
 
@@ -188,14 +200,10 @@ def csv_load(
 def csv_load(
     source: TextProvider,
     *,
-    delimiter: str = ...,
-    column_names: Sequence[str] | None = ...,
     dataclass: None = None,
-    field_metadata_key: str = ...,
-    field_to_column_name: Mapping[str, str] | None = ...,
     init_function: Callable[..., dict[str, object]],  # REQUIRED
-    allow_column_subset: bool = ...,
-    string_parser: StringParser | None = ...,
+    mapping: DataMapping | None = ...,
+    options: CsvLoadOptions | None = ...,
 ) -> Iterator[dict[str, object]]: ...
 
 
@@ -203,38 +211,36 @@ def csv_load(
 def csv_load(
     source: TextProvider,
     *,
-    delimiter: str = ...,
-    column_names: Sequence[str] | None = ...,
     dataclass: type[T],  # REQUIRED
-    field_metadata_key: str = ...,
-    field_to_column_name: Mapping[str, str] | None = ...,
     init_function: Callable[..., T] | None = ...,
-    allow_column_subset: bool = ...,
-    string_parser: StringParser | None = ...,
+    mapping: DataMapping | None = ...,
+    options: CsvLoadOptions | None = ...,
 ) -> Iterator[T]: ...
 
 
 def csv_load(
     source: TextProvider,
     *,
-    delimiter: str = ",",
-    column_names: Sequence[str] | None = None,
     dataclass: type[T] | None = None,
-    field_metadata_key: str = "csv_key",
-    field_to_column_name: Mapping[str, str] | None = None,
     init_function: Callable[..., object] | None = None,
-    allow_column_subset: bool = True,
-    string_parser: StringParser | None = None,
+    mapping: DataMapping | None = None,
+    options: CsvLoadOptions | None = None,
 ) -> Iterator[T] | Iterator[dict[str, str]] | Iterator[dict[str, object]]:
     """Load CSV data into dicts or dataclass instances.
 
     For custom field types, a classmethod `from_string(cls, s: str)` may be
     implemented to control how an instance is created from a CSV cell string.
     """
+    if mapping is None:
+        mapping = DataMapping()
+    if options is None:
+        options = CsvLoadOptions()
     with open_text(source) as source_io:
-        reader = csv.reader(source_io, delimiter=delimiter)
+        reader = csv.reader(source_io, delimiter=options.delimiter)
+        string_parser = options.string_parser
         if string_parser is None:
             string_parser = StringParser.default()
+        column_names = mapping.column_names
         if column_names is None:
             try:
                 column_names = next(reader)
@@ -244,8 +250,8 @@ def csv_load(
 
         if init_function is not None:
             type_hints = get_callable_argument_hints(init_function)
-            if field_to_column_name is None:
-                field_to_column_name = {key: key for key in type_hints}
+            if mapping.field_to_column_name is None:
+                mapping.field_to_column_name = {key: key for key in type_hints}
         else:
             type_hints = None
         column_indices = {name: i for i, name in enumerate(column_names)}
@@ -256,9 +262,9 @@ def csv_load(
                 "Callable[..., T]", init_function or dataclass
             )
             type_hints = type_hints or get_callable_argument_hints(dataclass)
-            field_to_column_name = field_to_column_name or {
+            mapping.field_to_column_name = mapping.field_to_column_name or {
                 name: dataclass.__dataclass_fields__[name].metadata.get(
-                    field_metadata_key, name
+                    options.field_metadata_key, name
                 )
                 for name in type_hints
             }
@@ -270,7 +276,7 @@ def csv_load(
                     "Callable[..., dict[str, object]]", init_function
                 )
             type_hints = type_hints or {}
-            field_to_column_name = field_to_column_name or {
+            mapping.field_to_column_name = mapping.field_to_column_name or {
                 column_name: column_name for column_name in column_names
             }
 
@@ -279,7 +285,7 @@ def csv_load(
                 index,
                 string_parser.converters(type_hints.get(field_name, str)),
             )
-            for field_name, column_name in field_to_column_name.items()
+            for field_name, column_name in mapping.field_to_column_name.items()
             if (index := column_indices.get(column_name)) is not None
         }
         if len(field_to_index_and_converters) < len(column_names):
@@ -293,8 +299,7 @@ def csv_load(
             ]
 
             error = UnconsumedColumnsError(unconsumed_column_names)
-            logger.debug(str(error))
-            if not allow_column_subset:
+            if not options.allow_column_subset:
                 raise error
         yield from (
             init_function(

@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from sevaht_utility.parsing import (
+    CsvLoadOptions,
+    DataMapping,
     NotADataclassError,
     StringConverter,
     StringParser,
@@ -217,7 +219,9 @@ def test_csv_load_into_dataclass(
         csv_load(
             csv_lines,
             dataclass=ComplexClass,
-            string_parser=string_parser_from_registered,
+            options=CsvLoadOptions(
+                string_parser=string_parser_from_registered
+            ),
         )
     )
     assert len(instances) == len(csv_rows)
@@ -270,7 +274,9 @@ def test_csv_load_dataclass_with_custom_init(
             csv_lines,
             dataclass=ComplexClass,
             init_function=custom_factory,
-            string_parser=string_parser_from_registered,
+            options=CsvLoadOptions(
+                string_parser=string_parser_from_registered
+            ),
         )
     )
     for instance, row in zip(instances, csv_rows, strict=True):
@@ -312,14 +318,18 @@ def test_csv_load_dataclass_with_custom_init_and_field_names(
             csv_lines,
             dataclass=ComplexClass,
             init_function=custom_factory_with_field_names,
-            field_to_column_name={
-                "number": "custom_number",
-                "float_number": "float_number",
-                "from_registered": "from_registered",
-                "from_method": "from_method",
-                "string": "string",
-            },
-            string_parser=string_parser_from_registered,
+            mapping=DataMapping(
+                field_to_column_name={
+                    "number": "custom_number",
+                    "float_number": "float_number",
+                    "from_registered": "from_registered",
+                    "from_method": "from_method",
+                    "string": "string",
+                }
+            ),
+            options=CsvLoadOptions(
+                string_parser=string_parser_from_registered
+            ),
         )
     )
     for instance, row in zip(instances, csv_rows, strict=True):
@@ -336,16 +346,23 @@ def test_csv_load_into_dict(csv_rows: list[str]) -> None:
     """Ensure csv_load produces dicts when no dataclass is provided."""
     header = "number,float_number,from_registered,from_method,string"
     lines = [header, *csv_rows]
-    mapping = {"the_float": "float_number", "the_string": "string"}
+    mapping = DataMapping(
+        field_to_column_name={
+            "the_float": "float_number",
+            "the_string": "string",
+        }
+    )
 
     with pytest.raises(UnconsumedColumnsError):
         next(
             csv_load(
-                lines, field_to_column_name=mapping, allow_column_subset=False
+                lines,
+                mapping=mapping,
+                options=CsvLoadOptions(allow_column_subset=False),
             )
         )
 
-    results = list(csv_load(lines, field_to_column_name=mapping))
+    results = list(csv_load(lines, mapping=mapping))
 
     for row, result in zip(csv_rows, results, strict=True):
         _, f, _, _, s = row.split(",")
@@ -369,7 +386,7 @@ def test_csv_load_missing_column_name(csv_rows: list[str]) -> None:
 def test_csv_load_custom_delimiter() -> None:
     """Verify custom delimiter works as expected."""
     csv_data = ["a|b|c", "1|2|3"]
-    results = list(csv_load(csv_data, delimiter="|"))
+    results = list(csv_load(csv_data, options=CsvLoadOptions(delimiter="|")))
     assert results == [{"a": "1", "b": "2", "c": "3"}]
 
 
