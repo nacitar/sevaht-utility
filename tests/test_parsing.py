@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from sevaht_utility.naming import NameStyle
 from sevaht_utility.parsing import (
     CsvLoadOptions,
     DataMapping,
@@ -195,6 +196,11 @@ def csv_header() -> str:
 
 
 @pytest.fixture
+def csv_header_different_style() -> str:
+    return "customNumber,floatNumber,fromRegistered,fromMethod,string"
+
+
+@pytest.fixture
 def csv_rows() -> list[str]:
     return [
         "1,3.14,2,3,Hello",
@@ -209,30 +215,45 @@ def csv_lines(csv_header: str, csv_rows: list[str]) -> list[str]:
 
 
 def test_csv_load_into_dataclass(
-    csv_lines: list[str],
+    csv_header: str,
+    csv_header_different_style: str,
     csv_rows: list[str],
     string_parser_from_registered: StringParser,
 ) -> None:
     """Verify normal dataclass loading with automatic converters
     and metadata mapping."""
-    instances = list(
-        csv_load(
-            csv_lines,
-            dataclass=ComplexClass,
-            options=CsvLoadOptions(
-                string_parser=string_parser_from_registered
-            ),
-        )
-    )
-    assert len(instances) == len(csv_rows)
+    result_set = [
+        list(
+            csv_load(
+                [csv_header, *csv_rows],
+                dataclass=ComplexClass,
+                options=CsvLoadOptions(
+                    string_parser=string_parser_from_registered
+                ),
+            )
+        ),
+        list(
+            csv_load(
+                [csv_header_different_style, *csv_rows],
+                dataclass=ComplexClass,
+                mapping=DataMapping(name_style=NameStyle.CAMEL_CASE),
+                options=CsvLoadOptions(
+                    string_parser=string_parser_from_registered
+                ),
+            )
+        ),
+    ]
 
-    for instance, row in zip(instances, csv_rows, strict=True):
-        n, f, r, m, s = row.split(",")
-        assert instance.number == int(n)
-        assert instance.float_number == float(f)
-        assert instance.from_registered.value == int(r)
-        assert instance.from_method.value == int(m)
-        assert instance.string == s
+    for instances in result_set:
+        assert len(instances) == len(csv_rows)
+
+        for instance, row in zip(instances, csv_rows, strict=True):
+            n, f, r, m, s = row.split(",")
+            assert instance.number == int(n)
+            assert instance.float_number == float(f)
+            assert instance.from_registered.value == int(r)
+            assert instance.from_method.value == int(m)
+            assert instance.string == s
 
 
 def test_csv_load_raises_if_not_dataclass(csv_lines: list[str]) -> None:

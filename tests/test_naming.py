@@ -76,7 +76,7 @@ def test_join_words_ignores_empty_words() -> None:
 def test_convert_name_examples(
     original_name: str, style: NameStyle, expected_name: str
 ) -> None:
-    converted = convert_name(original_name, style)
+    converted = convert_name(original_name, style=style)
     assert converted == expected_name
 
 
@@ -101,15 +101,15 @@ def test_convert_name_idempotent_over_words(
         convert_name(original, intermediate), target
     )
     """
-    direct_conversion = convert_name(original_name, style)
+    direct_conversion = convert_name(original_name, style=style)
     via_intermediate = convert_name(
-        convert_name(original_name, intermediate_style), style
+        convert_name(original_name, style=intermediate_style), style=style
     )
     assert via_intermediate == direct_conversion
 
 
 def test_convert_name_empty() -> None:
-    assert convert_name("", NameStyle.SNAKE_CASE) == ""
-    assert convert_name("", NameStyle.CAMEL_CASE) == ""
-    assert convert_name("", NameStyle.PASCAL_CASE) == ""
-    assert convert_name("", NameStyle.KEBAB_CASE) == ""
+    assert convert_name("", style=NameStyle.SNAKE_CASE) == ""
+    assert convert_name("", style=NameStyle.CAMEL_CASE) == ""
+    assert convert_name("", style=NameStyle.PASCAL_CASE) == ""
+    assert convert_name("", style=NameStyle.KEBAB_CASE) == ""

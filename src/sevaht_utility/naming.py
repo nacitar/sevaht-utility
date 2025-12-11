@@ -70,7 +70,7 @@ def join_words(words: Sequence[str], style: NameStyle) -> str:
     return cfg.separator.join(transformed)
 
 
-def convert_name(name: str, style: NameStyle) -> str:
+def convert_name(name: str, *, style: NameStyle) -> str:
     """Convert a name in any supported style to the given target style."""
     words = split_into_words(name)
     return join_words(words, style)

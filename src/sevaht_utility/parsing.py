@@ -16,6 +16,7 @@ from types import MappingProxyType, UnionType
 from typing import Any, TextIO, TypeAlias, TypeVar, cast, overload
 
 from .hinting import get_callable_argument_hints, iterate_types, verify_type
+from .naming import NameStyle, convert_name
 
 logger = logging.getLogger(__name__)
 
@@ -169,10 +170,27 @@ class NotADataclassError(TypeError):
         self.obj = obj
 
 
+class MutuallyExclusiveArgumentsError(Exception):
+    def __init__(self, arguments: Sequence[str]) -> None:
+        super().__init__(
+            f"Mutually exclusive arguments provided: {', '.join(arguments)}"
+        )
+
+
 @dataclass
 class DataMapping:
     column_names: Sequence[str] | None = None
     field_to_column_name: Mapping[str, str] | None = None
+    name_style: NameStyle | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            self.name_style is not None
+            and self.field_to_column_name is not None
+        ):
+            raise MutuallyExclusiveArgumentsError(
+                ["name_style", "field_to_column_name"]
+            )
 
 
 @dataclass
@@ -233,6 +251,16 @@ def csv_load(
     """
     mapping = mapping or DataMapping()
     options = options or CsvLoadOptions()
+    field_to_column_name = mapping.field_to_column_name
+
+    def fix_style(value: str) -> str:
+        nonlocal mapping
+        return (
+            convert_name(value, style=mapping.name_style)
+            if mapping.name_style
+            else value
+        )
+
     with open_text(source) as source_io:
         reader = csv.reader(source_io, delimiter=options.delimiter)
         string_parser = options.string_parser or StringParser.default()
@@ -246,8 +274,9 @@ def csv_load(
 
         if init_function is not None:
             type_hints = get_callable_argument_hints(init_function)
-            if mapping.field_to_column_name is None:
-                mapping.field_to_column_name = {key: key for key in type_hints}
+            field_to_column_name = field_to_column_name or {
+                key: fix_style(key) for key in type_hints
+            }
         else:
             type_hints = None
         column_indices = {name: i for i, name in enumerate(column_names)}
@@ -258,9 +287,11 @@ def csv_load(
                 "Callable[..., T]", init_function or dataclass
             )
             type_hints = type_hints or get_callable_argument_hints(dataclass)
-            mapping.field_to_column_name = mapping.field_to_column_name or {
-                name: dataclass.__dataclass_fields__[name].metadata.get(
-                    options.field_metadata_key, name
+            field_to_column_name = field_to_column_name or {
+                name: fix_style(
+                    dataclass.__dataclass_fields__[name].metadata.get(
+                        options.field_metadata_key, name
+                    )
                 )
                 for name in type_hints
             }
@@ -272,8 +303,9 @@ def csv_load(
                     "Callable[..., dict[str, object]]", init_function
                 )
             type_hints = type_hints or {}
-            mapping.field_to_column_name = mapping.field_to_column_name or {
-                column_name: column_name for column_name in column_names
+            field_to_column_name = field_to_column_name or {
+                column_name: fix_style(column_name)
+                for column_name in column_names
             }
 
         field_to_index_and_converters = {
@@ -281,7 +313,7 @@ def csv_load(
                 index,
                 string_parser.converters(type_hints.get(field_name, str)),
             )
-            for field_name, column_name in mapping.field_to_column_name.items()
+            for field_name, column_name in field_to_column_name.items()
             if (index := column_indices.get(column_name)) is not None
         }
         if len(field_to_index_and_converters) < len(column_names):
