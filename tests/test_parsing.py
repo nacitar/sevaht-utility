@@ -10,6 +10,7 @@ from sevaht_utility.naming import NameStyle
 from sevaht_utility.parsing import (
     CsvLoadOptions,
     DataMapping,
+    MutuallyExclusiveArgumentsError,
     NotADataclassError,
     StringConverter,
     StringParser,
@@ -212,6 +213,17 @@ def csv_rows() -> list[str]:
 @pytest.fixture
 def csv_lines(csv_header: str, csv_rows: list[str]) -> list[str]:
     return [csv_header, *csv_rows]
+
+
+def test_data_mapping_exclusive_arguments_throw() -> None:
+    with pytest.raises(MutuallyExclusiveArgumentsError):
+        DataMapping(
+            field_to_column_name={
+                "the_float": "float_number",
+                "the_string": "string",
+            },
+            name_style=NameStyle.PASCAL_CASE,
+        )
 
 
 def test_csv_load_into_dataclass(
