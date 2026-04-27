@@ -496,6 +496,19 @@ def test_csv_load_with_repeated_headers_is_ok() -> None:
     assert set(results[0].keys()) == {"a", "b"}
 
 
+def test_csv_load_detects_unconsumed_columns_with_duplicate_mapping() -> None:
+    data = ["a,b", "1,2"]
+    mapping = DataMapping(field_to_column_name={"x": "a", "y": "a"})
+    with pytest.raises(UnconsumedColumnsError):
+        next(
+            csv_load(
+                data,
+                mapping=mapping,
+                options=CsvLoadOptions(allow_column_subset=False),
+            )
+        )
+
+
 def test_csv_load_with_empty_file_yields_nothing(tmp_path: Path) -> None:
     p = tmp_path / "empty.csv"
     p.write_text("")

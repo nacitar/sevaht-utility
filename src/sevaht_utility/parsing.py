@@ -203,6 +203,83 @@ class CsvLoadOptions:
     )
 
 
+FieldMapping: TypeAlias = Mapping[str, str]
+FieldConverters: TypeAlias = list[tuple[StringConverter, type[Any]]]
+FieldIndexAndConverters: TypeAlias = dict[str, tuple[int, FieldConverters]]
+
+
+def _convert_name_if_needed(value: str, *, mapping: DataMapping) -> str:
+    return (
+        convert_name(value, style=mapping.name_style)
+        if mapping.name_style
+        else value
+    )
+
+
+def _resolve_field_to_column_name(
+    *,
+    type_hints: Mapping[str, type[Any]],
+    field_to_column_name: FieldMapping | None,
+    mapping: DataMapping,
+    options: CsvLoadOptions,
+    dataclass_type: type[Any] | None,
+) -> FieldMapping:
+    if field_to_column_name is not None:
+        return field_to_column_name
+    if dataclass_type is None:
+        return {
+            key: _convert_name_if_needed(key, mapping=mapping)
+            for key in type_hints
+        }
+    return {
+        name: _convert_name_if_needed(
+            dataclass_type.__dataclass_fields__[name].metadata.get(
+                options.field_metadata_key, name
+            ),
+            mapping=mapping,
+        )
+        for name in type_hints
+    }
+
+
+def _build_field_indices_and_converters(
+    *,
+    field_to_column_name: Mapping[str, str],
+    column_indices: Mapping[str, int],
+    type_hints: Mapping[str, type[Any]],
+    string_parser: StringParser,
+) -> FieldIndexAndConverters:
+    return {
+        field_name: (
+            index,
+            string_parser.converters(type_hints.get(field_name, str)),
+        )
+        for field_name, column_name in field_to_column_name.items()
+        if (index := column_indices.get(column_name)) is not None
+    }
+
+
+def _assert_or_allow_unconsumed_columns(
+    *,
+    column_names: Sequence[str],
+    field_to_index_and_converters: FieldIndexAndConverters,
+    allow_column_subset: bool,
+) -> None:
+    consumed_indices = {i for i, _ in field_to_index_and_converters.values()}
+    if len(consumed_indices) >= len(column_names):
+        return
+    unconsumed_column_names = [
+        name
+        for i, name in enumerate(column_names)
+        if i not in consumed_indices
+    ]
+    if not unconsumed_column_names:
+        return
+    error = UnconsumedColumnsError(unconsumed_column_names)
+    if not allow_column_subset:
+        raise error
+
+
 @overload  # dict case, no init_function for type hints; dict[str, str]
 def csv_load(
     source: TextProvider,
@@ -248,18 +325,18 @@ def csv_load(
 
     For custom field types, a classmethod `from_string(cls, s: str)` may be
     implemented to control how an instance is created from a CSV cell string.
+
+    Field mapping precedence (highest to lowest):
+    1) `mapping.field_to_column_name`
+    2) `init_function` parameter names (optionally normalized by `name_style`)
+    3) Dataclass field metadata key (`options.field_metadata_key`) or field name
+       (optionally normalized by `name_style`)
+    4) Dict mode defaults to CSV column names (optionally normalized by
+       `name_style`)
     """
     mapping = mapping or DataMapping()
     options = options or CsvLoadOptions()
     field_to_column_name = mapping.field_to_column_name
-
-    def fix_style(value: str) -> str:
-        nonlocal mapping
-        return (
-            convert_name(value, style=mapping.name_style)
-            if mapping.name_style
-            else value
-        )
 
     with open_text(source) as source_io:
         reader = csv.reader(source_io, delimiter=options.delimiter)
@@ -272,67 +349,65 @@ def csv_load(
                 logger.debug("No column names provided and source is empty.")
                 return
 
+        resolved_init_function = init_function
         if init_function is not None:
             type_hints = get_callable_argument_hints(init_function)
-            field_to_column_name = field_to_column_name or {
-                key: fix_style(key) for key in type_hints
-            }
         else:
             type_hints = None
         column_indices = {name: i for i, name in enumerate(column_names)}
         if dataclass is not None:
             if not is_dataclass(dataclass):
                 raise NotADataclassError(dataclass)
-            init_function = cast(
-                "Callable[..., T]", init_function or dataclass
+            resolved_init_function = cast(
+                "Callable[..., T]", resolved_init_function or dataclass
             )
             type_hints = type_hints or get_callable_argument_hints(dataclass)
-            field_to_column_name = field_to_column_name or {
-                name: fix_style(
-                    dataclass.__dataclass_fields__[name].metadata.get(
-                        options.field_metadata_key, name
-                    )
-                )
-                for name in type_hints
-            }
-        else:
-            if init_function is None:
-                init_function = cast("Callable[..., dict[str, str]]", dict)
+            if field_to_column_name is None and init_function is not None:
+                field_to_column_name = {
+                    key: _convert_name_if_needed(key, mapping=mapping)
+                    for key in type_hints
+                }
             else:
-                init_function = cast(
-                    "Callable[..., dict[str, object]]", init_function
+                field_to_column_name = _resolve_field_to_column_name(
+                    type_hints=type_hints,
+                    field_to_column_name=field_to_column_name,
+                    mapping=mapping,
+                    options=options,
+                    dataclass_type=dataclass,
+                )
+        else:
+            if resolved_init_function is None:
+                resolved_init_function = cast(
+                    "Callable[..., dict[str, str]]", dict
+                )
+            else:
+                resolved_init_function = cast(
+                    "Callable[..., dict[str, object]]", resolved_init_function
                 )
             type_hints = type_hints or {}
             field_to_column_name = field_to_column_name or {
-                column_name: fix_style(column_name)
+                column_name: _convert_name_if_needed(
+                    column_name, mapping=mapping
+                )
                 for column_name in column_names
             }
 
-        field_to_index_and_converters = {
-            field_name: (
-                index,
-                string_parser.converters(type_hints.get(field_name, str)),
-            )
-            for field_name, column_name in field_to_column_name.items()
-            if (index := column_indices.get(column_name)) is not None
-        }
-        if len(field_to_index_and_converters) < len(column_names):
-            consumed_indices = {
-                i for i, _ in field_to_index_and_converters.values()
-            }
-            unconsumed_column_names = [
-                name
-                for i, name in enumerate(column_names)
-                if i not in consumed_indices
-            ]
-
-            error = UnconsumedColumnsError(unconsumed_column_names)
-            if not options.allow_column_subset:
-                raise error
+        field_to_index_and_converters = _build_field_indices_and_converters(
+            field_to_column_name=field_to_column_name,
+            column_indices=column_indices,
+            type_hints=type_hints,
+            string_parser=string_parser,
+        )
+        _assert_or_allow_unconsumed_columns(
+            column_names=column_names,
+            field_to_index_and_converters=field_to_index_and_converters,
+            allow_column_subset=options.allow_column_subset,
+        )
+        first_valid_conversion = StringParser.first_valid_conversion
         yield from (
-            init_function(
+            resolved_init_function(
                 **{
-                    name: StringParser.first_valid_conversion(
+                    name: first_valid_conversion(
                         row[index], converters=converters
                     )
                     for name, (
