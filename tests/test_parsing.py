@@ -8,9 +8,10 @@ import pytest
 
 from sevaht_utility.naming import NameStyle
 from sevaht_utility.parsing import (
+    AmbiguousColumnNamesError,
+    AmbiguousFieldMappingsError,
     CsvLoadOptions,
     DataMapping,
-    MutuallyExclusiveArgumentsError,
     NotADataclassError,
     StringConverter,
     StringParser,
@@ -215,15 +216,15 @@ def csv_lines(csv_header: str, csv_rows: list[str]) -> list[str]:
     return [csv_header, *csv_rows]
 
 
-def test_data_mapping_exclusive_arguments_throw() -> None:
-    with pytest.raises(MutuallyExclusiveArgumentsError):
-        DataMapping(
-            field_to_column_name={
-                "the_float": "float_number",
-                "the_string": "string",
-            },
-            name_style=NameStyle.PASCAL_CASE,
-        )
+def test_data_mapping_allows_name_style_with_explicit_mapping() -> None:
+    mapping = DataMapping(
+        field_to_column_name={
+            "the_float": "float_number",
+            "the_string": "string",
+        },
+        name_style=NameStyle.PASCAL_CASE,
+    )
+    assert mapping.name_style is NameStyle.PASCAL_CASE
 
 
 def test_csv_load_into_dataclass(
@@ -489,17 +490,26 @@ def test_csv_load_dataclass_with_initvar_and_init_false(
         ]
 
 
-def test_csv_load_with_repeated_headers_is_ok() -> None:
+def test_csv_load_with_repeated_headers_raises_ambiguity() -> None:
     data = ["a,a,b", "1,2,3"]
-    results = list(csv_load(data))
-    assert isinstance(results[0], dict)
-    assert set(results[0].keys()) == {"a", "b"}
+    with pytest.raises(AmbiguousColumnNamesError):
+        list(csv_load(data))
+
+
+def test_csv_load_name_style_ambiguity_raises() -> None:
+    data = ["ID,id,b", "1,2,3"]
+    with pytest.raises(AmbiguousColumnNamesError):
+        list(
+            csv_load(
+                data, mapping=DataMapping(name_style=NameStyle.CAMEL_CASE)
+            )
+        )
 
 
 def test_csv_load_detects_unconsumed_columns_with_duplicate_mapping() -> None:
     data = ["a,b", "1,2"]
     mapping = DataMapping(field_to_column_name={"x": "a", "y": "a"})
-    with pytest.raises(UnconsumedColumnsError):
+    with pytest.raises(AmbiguousFieldMappingsError):
         next(
             csv_load(
                 data,
@@ -507,6 +517,54 @@ def test_csv_load_detects_unconsumed_columns_with_duplicate_mapping() -> None:
                 options=CsvLoadOptions(allow_column_subset=False),
             )
         )
+
+
+def test_csv_load_ambiguity_can_be_resolved_with_column_names() -> None:
+    data_rows = ["1,2,3"]
+    result = list(
+        csv_load(
+            data_rows,
+            mapping=DataMapping(column_names=["a_first", "a_second", "b"]),
+        )
+    )
+    assert result == [{"a_first": "1", "a_second": "2", "b": "3"}]
+
+
+def test_csv_load_ambiguity_can_be_resolved_with_column_index() -> None:
+    @dataclass
+    class DuplicateHeaderRow:
+        first_a: int
+        second_a: int
+
+    data = ["a,a,b", "1,2,3"]
+    result = list(
+        csv_load(
+            data,
+            dataclass=DuplicateHeaderRow,
+            mapping=DataMapping(
+                field_to_column_name={"first_a": "a", "second_a": "a"},
+                field_to_column_index={"first_a": 0, "second_a": 1},
+            ),
+        )
+    )
+    assert result == [DuplicateHeaderRow(first_a=1, second_a=2)]
+
+
+def test_csv_load_dataclass_metadata_works_with_name_style_for_id() -> None:
+    @dataclass
+    class IdentifierRow:
+        id: int = field(metadata={"csv_key": "ID"})
+        hero_type: int
+
+    data = ["ID,heroType", "100,7"]
+    result = list(
+        csv_load(
+            data,
+            dataclass=IdentifierRow,
+            mapping=DataMapping(name_style=NameStyle.CAMEL_CASE),
+        )
+    )
+    assert result == [IdentifierRow(id=100, hero_type=7)]
 
 
 def test_csv_load_with_empty_file_yields_nothing(tmp_path: Path) -> None:
