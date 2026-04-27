@@ -62,6 +62,26 @@ def test_verify_type_with_union_and_subtypes() -> None:
     assert verify_type(A | B, B()).__class__ is B
 
 
+def test_verify_type_accepts_parameterized_generic_shallowly() -> None:
+    payload = {"a": 1}
+    assert verify_type(dict[Any, Any], payload) is payload
+
+
+def test_verify_type_accepts_parameterized_list_shallowly() -> None:
+    payload = ["x"]
+    assert verify_type(list[int], payload) is payload
+
+
+def test_verify_type_rejects_wrong_parameterized_generic_origin() -> None:
+    with pytest.raises(InvalidTypeError):
+        verify_type(dict[str, int], [])
+
+
+def test_verify_type_union_accepts_parameterized_generic() -> None:
+    payload: object = {"a": 1}
+    assert verify_type(dict[str, int] | list[int], payload) is payload
+
+
 # --- get_callable_argument_hints ---------------------------------------------
 
 

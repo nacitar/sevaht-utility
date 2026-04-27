@@ -50,9 +50,8 @@ def iterate_types(*source_types: type | UnionType) -> Iterator[type]:
 
 def verify_type(expected_type: type | UnionType, value: T) -> T:
     for candidate_type in iterate_types(expected_type):
-        if candidate_type in (Any, object) or isinstance(
-            value, candidate_type
-        ):
+        runtime_type = get_origin(candidate_type) or candidate_type
+        if runtime_type in (Any, object) or isinstance(value, runtime_type):
             return value
     raise InvalidTypeError(value, expected_type=expected_type)
 
