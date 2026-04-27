@@ -36,6 +36,17 @@ class InvalidTypeError(TypeError):
         self.value = value
 
 
+class ParameterizedTypeNotSupportedError(TypeError):
+    """Raised when verify_type receives a parameterized generic."""
+
+    def __init__(self, expected_type: object) -> None:
+        super().__init__(
+            "Parameterized generics are not supported by verify_type: "
+            f"{expected_type}. Use an unparameterized runtime type instead."
+        )
+        self.expected_type = expected_type
+
+
 def iterate_types(*source_types: type | UnionType) -> Iterator[type]:
     stack = deque(source_types)
     seen: set[type] = set()
@@ -49,10 +60,16 @@ def iterate_types(*source_types: type | UnionType) -> Iterator[type]:
 
 
 def verify_type(expected_type: type | UnionType, value: T) -> T:
+    matched = False
     for candidate_type in iterate_types(expected_type):
-        runtime_type = get_origin(candidate_type) or candidate_type
-        if runtime_type in (Any, object) or isinstance(value, runtime_type):
-            return value
+        if get_origin(candidate_type) is not None:
+            raise ParameterizedTypeNotSupportedError(candidate_type)
+        if candidate_type in (Any, object) or isinstance(
+            value, candidate_type
+        ):
+            matched = True
+    if matched:
+        return value
     raise InvalidTypeError(value, expected_type=expected_type)
 
 

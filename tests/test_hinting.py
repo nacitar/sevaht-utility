@@ -7,6 +7,7 @@ import pytest
 
 from sevaht_utility.hinting import (
     InvalidTypeError,
+    ParameterizedTypeNotSupportedError,
     get_callable_argument_hints,
     iterate_types,
     verify_type,
@@ -62,24 +63,23 @@ def test_verify_type_with_union_and_subtypes() -> None:
     assert verify_type(A | B, B()).__class__ is B
 
 
-def test_verify_type_accepts_parameterized_generic_shallowly() -> None:
-    payload = {"a": 1}
-    assert verify_type(dict[Any, Any], payload) is payload
+def test_verify_type_rejects_parameterized_generic() -> None:
+    with pytest.raises(ParameterizedTypeNotSupportedError):
+        verify_type(dict[Any, Any], {"a": 1})
 
 
-def test_verify_type_accepts_parameterized_list_shallowly() -> None:
-    payload = ["x"]
-    assert verify_type(list[int], payload) is payload
+def test_verify_type_rejects_parameterized_list() -> None:
+    with pytest.raises(ParameterizedTypeNotSupportedError):
+        verify_type(list[int], ["x"])
 
 
-def test_verify_type_rejects_wrong_parameterized_generic_origin() -> None:
-    with pytest.raises(InvalidTypeError):
-        verify_type(dict[str, int], [])
+def test_verify_type_rejects_parameterized_generic_in_union() -> None:
+    with pytest.raises(ParameterizedTypeNotSupportedError):
+        verify_type(dict[str, int] | list[int], {"a": 1})
 
 
-def test_verify_type_union_accepts_parameterized_generic() -> None:
-    payload: object = {"a": 1}
-    assert verify_type(dict[str, int] | list[int], payload) is payload
+def test_verify_type_union_with_non_parameterized_types_still_works() -> None:
+    assert verify_type(dict | list, {"a": 1}) == {"a": 1}
 
 
 # --- get_callable_argument_hints ---------------------------------------------
