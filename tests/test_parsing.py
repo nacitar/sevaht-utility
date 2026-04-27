@@ -592,10 +592,7 @@ def test_strip_json5_comments_and_trailing_commas() -> None:
             "msg": "Line1\\nLine2", // multi-line escape
             "num": 5,
         }
-        """: {
-            "msg": "Line1\nLine2",
-            "num": 5,
-        },
+        """: {"msg": "Line1\nLine2", "num": 5},
     }
 
     for src, expected_obj in samples.items():

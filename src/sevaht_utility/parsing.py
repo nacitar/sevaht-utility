@@ -86,7 +86,7 @@ class StringParser:
         init=False, default_factory=lambda: dict(default_string_converters())
     )
     _CONVERTER_LOCK: threading.Lock = field(
-        init=False, default_factory=lambda: threading.Lock()
+        init=False, default_factory=threading.Lock
     )
 
     @staticmethod
@@ -232,9 +232,7 @@ class CsvLoadOptions:
     delimiter: str = ","
     field_metadata_key: str = "csv_key"
     allow_column_subset: bool = True
-    string_parser: StringParser = field(
-        default_factory=lambda: StringParser.default()
-    )
+    string_parser: StringParser = field(default_factory=StringParser.default)
 
 
 FieldMapping: TypeAlias = Mapping[str, str]
