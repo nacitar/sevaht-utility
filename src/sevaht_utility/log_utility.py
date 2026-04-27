@@ -4,14 +4,21 @@ import logging
 import sys
 from contextlib import contextmanager
 from dataclasses import KW_ONLY, dataclass
+from functools import wraps
 from logging import Handler
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ParamSpec, TypeVar
 
 if TYPE_CHECKING:
     import argparse
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
+
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,14 +47,9 @@ class LogFileOptions:
 def configure_logging_custom(
     console_level: int, log_file_options: LogFileOptions | None = None
 ) -> None:
-    class SuppressConsoleOutputForMainModule(logging.Filter):
-        def __init__(self) -> None:
-            super().__init__()
-
+    class SuppressFileOnly(logging.Filter):
         def filter(self, record: logging.LogRecord) -> bool:
-            return record.name != (
-                f"{__package__}.__main__" if __package__ else "__main__"
-            )
+            return not getattr(record, "file_only", False)
 
     logging.getLogger().handlers = []
     console_handler = logging.StreamHandler()
@@ -55,7 +57,7 @@ def configure_logging_custom(
     console_handler.setFormatter(
         logging.Formatter(fmt="{levelname:s}: {message:s}", style="{")
     )
-    console_handler.addFilter(SuppressConsoleOutputForMainModule())
+    console_handler.addFilter(SuppressFileOnly())
     logging.getLogger().addHandler(console_handler)
     global_level = console_level
     if log_file_options:
@@ -161,3 +163,27 @@ def suppress_console_logging() -> Iterator[None]:
     finally:
         for handler in removed_handlers:
             root_logger.addHandler(handler)
+
+
+def log_exceptions(
+    *,
+    logger: logging.Logger | None = None,
+    message: str = "uncaught exception",
+    file_only: bool = True,
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
+    def decorator(function: Callable[P, R]) -> Callable[P, R]:
+        target_logger = logger or logging.getLogger(function.__module__)
+
+        @wraps(function)
+        def wrapped(*args: P.args, **kwargs: P.kwargs) -> R:
+            try:
+                return function(*args, **kwargs)
+            except Exception:
+                target_logger.exception(
+                    message, extra={"file_only": file_only}
+                )
+                raise
+
+        return wrapped
+
+    return decorator
